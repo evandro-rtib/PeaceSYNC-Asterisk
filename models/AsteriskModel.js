@@ -1,5 +1,11 @@
-const { log } = require('console');
 const fs = require('fs');
+const fse = require('fs-extra');
+const mariadb = require('mariadb')
+const dbConfig = require('../configs/db')
+const hubConfig = require('../configs/hub')
+const axios = require('axios');
+const hub = require('../configs/hub');
+
 class AsteriskModel {
 
     constructor() {
@@ -7,26 +13,54 @@ class AsteriskModel {
         this.folder_call_centers = `${this.folder_asterisk}/call_centers`;
         this.folder_globals = `${this.folder_asterisk}/globals`;
         this.folder_scripts = `${this.folder_asterisk}/scripts`;
+        this.folder_scripts = `${this.folder_asterisk}/python`;
+        this.connection = null
+        this.initConnection()
     }
+    
+      async initConnection() {
+        try {
+          const pool = await mariadb.createPool(dbConfig)
+          this.connection = await pool.getConnection()
+        } catch (error) {
+          console.log(error)
+        }
+      }
 
     async prepareBasicFolders() {
+        await this.deleteFolder(this.folder_call_centers)
+        
         try {
-            await this.createFolders(this.folder_asterisk);
-        } catch (err) {
-            console.error("Erro ao criar as pastas:", err);
-        }
-        try {
-            await this.createFolders(this.folder_call_centers);
-        } catch (err) {
-            console.error("Erro ao criar as pastas:", err);
-        }
-        try {
-            await this.createFolders(this.folder_globals);
-        } catch (err) {
-            console.error("Erro ao criar as pastas:", err);
-        }
-        try {
-            await this.createFolders(this.folder_scripts);
+            await Promise.all([
+                (async () => {
+                    try {
+                        await this.createFolders(this.folder_asterisk);
+                    } catch (err) {
+                        console.error(`Erro ao criar a pasta ${this.folder_asterisk}:`, err);
+                    }
+                })(),
+                (async () => {
+                    try {
+                        await this.createFolders(this.folder_call_centers);
+                    } catch (err) {
+                        console.error(`Erro ao criar a pasta ${this.folder_call_centers}:`, err);
+                    }
+                })(),
+                (async () => {
+                    try {
+                        await this.createFolders(this.folder_globals);
+                    } catch (err) {
+                        console.error(`Erro ao criar a pasta ${this.folder_globals}:`, err);
+                    }
+                })(),
+                (async () => {
+                    try {
+                        await this.createFolders(this.folder_scripts);
+                    } catch (err) {
+                        console.error(`Erro ao criar a pasta ${this.folder_scripts}:`, err);
+                    }
+                })()
+            ]);
         } catch (err) {
             console.error("Erro ao criar as pastas:", err);
         }
@@ -55,13 +89,14 @@ class AsteriskModel {
             });
         });
     }
+    
     async listCallCenter(objData) {
         const list = []
         objData.peers.forEach(obj => {
             if (obj.CALL_CENTER_ID) {
-                const test = list.find(e => e === obj.CALL_CENTER_ID)
+                const test = list.find(e => e.CALL_CENTER_ID == obj.CALL_CENTER_ID)
                 if (!test) {
-                    list.push(obj.CALL_CENTER_ID)
+                    list.push({CALL_CENTER_ID: obj.CALL_CENTER_ID})
                 }
             }
         })
@@ -72,9 +107,9 @@ class AsteriskModel {
         const list = []
         objData.peers.forEach(obj => {
             if (obj.CUSTOMER_ID && obj.CALL_CENTER_ID) {
-                const test = list.find(e => e.CUSTOMER_ID === obj.CUSTOMER_ID && e.CALL_CENTER_ID === obj.CALL_CENTER_ID)
+                const test = list.find(e => e.CUSTOMER_ID == obj.CUSTOMER_ID && e.CALL_CENTER_ID == obj.CALL_CENTER_ID)
                 if (!test) {
-                    list.push(obj.CUSTOMER_ID)
+                    list.push({CALL_CENTER_ID: obj.CALL_CENTER_ID, CUSTOMER_ID: obj.CUSTOMER_ID})
                 }
             }
         })
@@ -89,7 +124,13 @@ class AsteriskModel {
             });
      
             stream.on('finish', () => {
-                resolve();
+                fs.chmod(filename, '755', (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
             });
 
             rows.forEach(row => {
@@ -97,6 +138,16 @@ class AsteriskModel {
             });
     
             stream.end();
+        });
+    }
+
+    async deleteFolder(folder){
+        fse.remove(folder, err => {
+            if (err) {
+                console.error(`Erro ao excluir a pasta: ${folder}`, err);
+            } else {
+                console.log(`Pasta ${folder} excluída com sucesso.`);
+            }
         });
     }
 
@@ -122,13 +173,18 @@ class AsteriskModel {
     async createQueue (queueData){
         const dataQueue = []
         const filename = `${this.folder_call_centers}/${queueData.CALL_CENTER_ID}/queues/${queueData.ID}.conf`
+        let associatedPeers = ""
+        queueData.associatedPeers.forEach(member => { associatedPeers += `member=${member.TECNOLOGY}/${member.PEER_ID} ; ${member.CALLER_NUM} : ${member.CALLER_NAME}\n`})
             const queueConfiguration = `
                                         [${queueData.ID}] ; ${queueData.QUEUE_NAME}
                                         strategy=${queueData.STRATEGY}
+                                        setinterfacevar=yes
+                                        setqueuevar=yes
+                                        ${associatedPeers}
                                     `
-            dataContext.push(await this.cleanLines(contextConfiguration))
+            dataQueue.push(await this.cleanLines(queueConfiguration))
 
-        await this.writeFile(filename,dataContext)
+        await this.writeFile(filename,dataQueue)
     }
 
     async createTemplate (templateData){
@@ -179,17 +235,20 @@ class AsteriskModel {
                                 auth=auth${peerData.PEER_ID}
                                 aors=${peerData.PEER_ID}
                                 callerid=${peerData.CALLER_NAME} <${peerData.CALLER_NUM}>
+                                set_var=CALL_CENTER_ID=${peerData.CALL_CENTER_ID}
+                                set_var=CALL_CENTER_NAME=${peerData.CALL_CENTER_NAME}
+                                set_var=CUSTOMER_ID=${peerData.CUSTOMER_ID}
+                                set_var=CUSTOMER_NAME=${peerData.CUSTOMER_NAME}
                             `
         let auth =    `
                             [auth${peerData.PEER_ID}](auth-${peerData.TEMPLATE_ID}) ; ${peerData.CALLER_NUM} - ${peerData.CALLER_NAME}
                             username=${peerData.PEER_ID}
-
                         `
         let aor =     `
                             [${peerData.PEER_ID}](aor-${peerData.TEMPLATE_ID}) ; ${peerData.CALLER_NUM} - ${peerData.CALLER_NAME}
                         `
         if(!peerData.DEFAULT_PASSWORD && peerData.PASSWORD){
-            auth = auth +`\nsecret=${peerData.PASSWORD}`
+            auth = auth +`\npassword=${peerData.PASSWORD}`
         }
 
 
@@ -205,70 +264,416 @@ class AsteriskModel {
     }
 
     async update(objData) {
-        console.log(objData);
-        await this.prepareBasicFolders()
-        const listCallCenter = await this.listCallCenter(objData)
-        const listCustomer = await this.listCustomer(objData)
-
-        if (listCallCenter.length > 0 && listCustomer.length > 0) {
-            await Promise.all(listCallCenter.map(async callCenter => {
-                const folder_call_center = `${this.folder_call_centers}/${callCenter}`
-                await this.createFolders(folder_call_center)
-
-                const folder_contexts = `${this.folder_call_centers}/${callCenter}/contexts`
-                await this.createFolders(folder_contexts)
-
-                const folder_templates = `${this.folder_call_centers}/${callCenter}/templates`
-                await this.createFolders(folder_templates)
-
-                const folder_queues = `${this.folder_call_centers}/${callCenter}/queues`
-                await this.createFolders(folder_queues)
-
-                await Promise.all(listCustomer.map(async customer => {
-
-                    const folder_customer = `${this.folder_call_centers}/${callCenter}/customers/${customer}`
-                    await this.createFolders(folder_customer)
-
-                    const folder_customer_tecnology_sip = `${this.folder_call_centers}/${callCenter}/customers/${customer}/SIP`
-                    await this.createFolders(folder_customer_tecnology_sip)
-
-                    const folder_customer_tecnology_pjsip = `${this.folder_call_centers}/${callCenter}/customers/${customer}/PJSIP`
-                    await this.createFolders(folder_customer_tecnology_pjsip)
-
-                    const folder_customer_tecnology_iax = `${this.folder_call_centers}/${callCenter}/customers/${customer}/IAX2`
-                    await this.createFolders(folder_customer_tecnology_iax)
-
-                }))
-                .then(() => {
-                    objData.basicFiles.forEach(basicFiles => {
-                        const filename = `${basicFiles.PATH}/${basicFiles.FILENAME}`
-                        const row = []
-                        row.push(`${basicFiles.CONTENT}`)
-                        this.writeFile(filename,row)
-                    })
-
-                    objData.queues.forEach(async queue => {
-                        await this.createQueue(queue)
-                    })
-
-                    objData.contexts.forEach(async context => {
-                        await this.createContext(context)
-                    })
-
-                    objData.templates.forEach(async template => {
-                            await this.createTemplate(template)
-                    })
-
-                    objData.peers.forEach(async peer => {
-                        if (peer.TECNOLOGY === 'PJSIP'){
-                            await this.createPJSIP(peer)
-                        }
-                        
-                    })
-                })
-            }))
+        try {
+            console.log(objData);
+            await this.prepareBasicFolders();
+            const listCallCenter = await this.listCallCenter(objData);
+            const listCustomer = await this.listCustomer(objData);
+    
+            if (listCallCenter.length > 0 && listCustomer.length > 0) {
+                await Promise.all(listCallCenter.map(async callCenter => {
+                    const folder_call_center = `${this.folder_call_centers}/${callCenter.CALL_CENTER_ID}`;
+                    await this.createFolders(folder_call_center);
+    
+                    const folder_contexts = `${folder_call_center}/contexts`;
+                    const folder_templates = `${folder_call_center}/templates`;
+                    const folder_queues = `${folder_call_center}/queues`;
+    
+                    await Promise.all([
+                        this.createFolders(folder_contexts),
+                        this.createFolders(folder_templates),
+                        this.createFolders(folder_queues)
+                    ]);
+    
+                    await Promise.all(listCustomer.map(async customer => {
+                        const folder_customer = `${folder_call_center}/customers/${customer.CUSTOMER_ID}`;
+                        const folder_customer_tecnology_sip = `${folder_customer}/SIP`;
+                        const folder_customer_tecnology_pjsip = `${folder_customer}/PJSIP`;
+                        const folder_customer_tecnology_iax = `${folder_customer}/IAX2`;
+    
+                        await Promise.all([
+                            this.createFolders(folder_customer),
+                            this.createFolders(folder_customer_tecnology_sip),
+                            this.createFolders(folder_customer_tecnology_pjsip),
+                            this.createFolders(folder_customer_tecnology_iax)
+                        ]);
+                    }));
+    
+                    await Promise.all([
+                        Promise.all(objData.basicFiles.map(async basicFiles => {
+                            const filename = `${basicFiles.PATH}/${basicFiles.FILENAME}`;
+                            const row = [`${basicFiles.CONTENT}`];
+                            await this.writeFile(filename, row);
+                        })),
+                        Promise.all(objData.queues.map(async queue => {
+                            await this.createQueue(queue);
+                        })),
+                        Promise.all(objData.contexts.map(async context => {
+                            await this.createContext(context);
+                        })),
+                        Promise.all(objData.templates.map(async template => {
+                            await this.createTemplate(template);
+                        })),
+                        Promise.all(objData.peers.map(async peer => {
+                            if (peer.TECNOLOGY === 'PJSIP') {
+                                await this.createPJSIP(peer);
+                            }
+                        }))
+                    ]);
+                }));
+                console.log('Todas as pastas de callcenter foram criadas.');
+            }
+        } catch (err) {
+            console.error("Erro ao atualizar:", err);
         }
     }
+    
+    async PEER_TO_PEER(objData){
+        console.log('peer_to_peer: ', objData);
+        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
+        const CUSTOMER_ID = objData.CUSTOMER_ID
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
+        const UNIQUEID = objData.UNIQUEID
+        const RECORD_FILE = objData.RECORD_FILE
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
+
+        try {
+            const confData =  {
+            CALL_TYPE: CALL_TYPE,
+            CALL_CENTER_ID: CALL_CENTER_ID,
+            CALL_CENTER_NAME: CALL_CENTER_NAME,
+            CUSTOMER_ID: CUSTOMER_ID,
+            CUSTOMER_NAME: CUSTOMER_NAME,
+            SOURCE_PEER_ID: SOURCE_PEER_ID,
+            SOURCE_PEER_CALLER_NUM: SOURCE_PEER_CALLER_NUM,
+            SOURCE_PEER_CALLER_NAME: SOURCE_PEER_CALLER_NAME,
+            SOURCE_AGENT_ID: SOURCE_AGENT_ID,
+            DESTINATION_PEER_ID: DESTINATION_PEER_ID,
+            DESTINATION_PEER_CALLER_NUM: DESTINATION_PEER_CALLER_NUM,
+            DESTINATION_PEER_CALLER_NAME: DESTINATION_PEER_CALLER_NAME,
+            UNIQUEID: UNIQUEID,
+            RECORD_FILE: RECORD_FILE
+            }
+        const url = `http://${hub.host}:${hub.port}/asterisk/cdr/PEER_TO_PEER`;
+        const response = await axios.post(`${url}`, confData);
+        } catch (error) {
+            console.log(error)
+        }
+
+        try {
+            const query = ` INSERT INTO
+                                TB_CDR_TODAY
+                                (
+                                    CALL_TYPE,
+                                    CALL_CENTER_ID,
+                                    CALL_CENTER_NAME,
+                                    CUSTOMER_ID,
+                                    CUSTOMER_NAME,
+                                    SOURCE_PEER_ID,
+                                    SOURCE_PEER_CALLER_NUM,
+                                    SOURCE_PEER_CALLER_NAME,
+                                    SOURCE_AGENT_ID,
+                                    DESTINATION_PEER_ID,
+                                    DESTINATION_PEER_CALLER_NUM,
+                                    DESTINATION_PEER_CALLER_NAME,
+                                    UNIQUEID,
+                                    RECORD_FILE,
+                                    DATE_START
+                                )
+                            VALUES
+                                (
+                                    "${CALL_TYPE}",
+                                    ${CALL_CENTER_ID},
+                                    "${CALL_CENTER_NAME}",
+                                    ${CUSTOMER_ID},
+                                    "${CUSTOMER_NAME}",
+                                    "${SOURCE_PEER_ID}",
+                                    "${SOURCE_PEER_CALLER_NUM}",
+                                    "${SOURCE_PEER_CALLER_NAME}",
+                                    ${SOURCE_AGENT_ID},
+                                    "${DESTINATION_PEER_ID}",
+                                    "${DESTINATION_PEER_CALLER_NUM}",
+                                    "${DESTINATION_PEER_CALLER_NAME}",
+                                    "${UNIQUEID}",
+                                    "${RECORD_FILE}",
+                                    NOW()
+                                )
+                        `
+            await this.connection.beginTransaction()
+            console.log(query);
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    async PEER_TO_TRUNK(objData){
+        console.log('peer_to_trunk: ', objData);
+        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
+        const CUSTOMER_ID = objData.CUSTOMER_ID
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
+        const UNIQUEID = objData.UNIQUEID
+        const RECORD_FILE = objData.RECORD_FILE
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
+        const DESTINATION_POS_PEER = objData.DESTINATION_POS_PEER
+
+        try {
+            const confData =  {
+            CALL_TYPE: CALL_TYPE,
+            CALL_CENTER_ID: CALL_CENTER_ID,
+            CALL_CENTER_NAME: CALL_CENTER_NAME,
+            CUSTOMER_ID: CUSTOMER_ID,
+            CUSTOMER_NAME: CUSTOMER_NAME,
+            SOURCE_PEER_ID: SOURCE_PEER_ID,
+            SOURCE_PEER_CALLER_NUM: SOURCE_PEER_CALLER_NUM,
+            SOURCE_PEER_CALLER_NAME: SOURCE_PEER_CALLER_NAME,
+            SOURCE_AGENT_ID: SOURCE_AGENT_ID,
+            DESTINATION_PEER_ID: DESTINATION_PEER_ID,
+            DESTINATION_PEER_CALLER_NUM: DESTINATION_PEER_CALLER_NUM,
+            DESTINATION_PEER_CALLER_NAME: DESTINATION_PEER_CALLER_NAME,
+            UNIQUEID: UNIQUEID,
+            RECORD_FILE: RECORD_FILE,
+            DESTINATION_POS_PEER: DESTINATION_POS_PEER
+            }
+        const url = `http://${hub.host}:${hub.port}/asterisk/cdr/PEER_TO_TRUNK`;
+        const response = await axios.post(`${url}`, confData);
+        } catch (error) {
+            console.log(error)
+        }
+
+        try {
+            const query = ` INSERT INTO
+                                TB_CDR_TODAY
+                                (
+                                    CALL_TYPE,
+                                    CALL_CENTER_ID,
+                                    CALL_CENTER_NAME,
+                                    CUSTOMER_ID,
+                                    CUSTOMER_NAME,
+                                    SOURCE_PEER_ID,
+                                    SOURCE_PEER_CALLER_NUM,
+                                    SOURCE_PEER_CALLER_NAME,
+                                    SOURCE_AGENT_ID,
+                                    DESTINATION_PEER_ID,
+                                    DESTINATION_PEER_CALLER_NUM,
+                                    DESTINATION_PEER_CALLER_NAME,
+                                    UNIQUEID,
+                                    RECORD_FILE,
+                                    DESTINATION_POS_PEER,
+                                    DATE_START
+                                )
+                            VALUES
+                                (
+                                    "${CALL_TYPE}",
+                                    ${CALL_CENTER_ID},
+                                    "${CALL_CENTER_NAME}",
+                                    ${CUSTOMER_ID},
+                                    "${CUSTOMER_NAME}",
+                                    "${SOURCE_PEER_ID}",
+                                    "${SOURCE_PEER_CALLER_NUM}",
+                                    "${SOURCE_PEER_CALLER_NAME}",
+                                    ${SOURCE_AGENT_ID},
+                                    "${DESTINATION_PEER_ID}",
+                                    "${DESTINATION_PEER_CALLER_NUM}",
+                                    "${DESTINATION_PEER_CALLER_NAME}",
+                                    "${UNIQUEID}",
+                                    "${RECORD_FILE}",
+                                    "${DESTINATION_POS_PEER}",
+                                    NOW()
+                                )
+                        `
+            await this.connection.beginTransaction()
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    async PEER_TO_QUEUE(objData){
+        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
+        const CUSTOMER_ID = objData.CUSTOMER_ID
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
+        const UNIQUEID = objData.UNIQUEID
+        const RECORD_FILE = objData.RECORD_FILE
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
+        const DESTINATION_QUEUE_ID = objData.DESTINATION_QUEUE_ID
+
+        try {
+            const confData =  {
+            CALL_TYPE: CALL_TYPE,
+            CALL_CENTER_ID: CALL_CENTER_ID,
+            CALL_CENTER_NAME: CALL_CENTER_NAME,
+            CUSTOMER_ID: CUSTOMER_ID,
+            CUSTOMER_NAME: CUSTOMER_NAME,
+            SOURCE_PEER_ID: SOURCE_PEER_ID,
+            SOURCE_PEER_CALLER_NUM: SOURCE_PEER_CALLER_NUM,
+            SOURCE_PEER_CALLER_NAME: SOURCE_PEER_CALLER_NAME,
+            SOURCE_AGENT_ID: SOURCE_AGENT_ID,
+            DESTINATION_PEER_ID: DESTINATION_PEER_ID,
+            DESTINATION_PEER_CALLER_NUM: DESTINATION_PEER_CALLER_NUM,
+            DESTINATION_PEER_CALLER_NAME: DESTINATION_PEER_CALLER_NAME,
+            UNIQUEID: UNIQUEID,
+            RECORD_FILE: RECORD_FILE,
+            DESTINATION_QUEUE_ID: DESTINATION_QUEUE_ID
+            }
+        const url = `http://${hub.host}:${hub.port}/asterisk/cdr/PEER_TO_QUEUE`;
+        const response = await axios.post(`${url}`, confData);
+        } catch (error) {
+            console.log(error)
+        }
+
+        try {
+            const query = ` INSERT INTO
+                                TB_CDR_TODAY
+                                (
+                                    CALL_TYPE,
+                                    CALL_CENTER_ID,
+                                    CALL_CENTER_NAME,
+                                    CUSTOMER_ID,
+                                    CUSTOMER_NAME,
+                                    SOURCE_PEER_ID,
+                                    SOURCE_PEER_CALLER_NUM,
+                                    SOURCE_PEER_CALLER_NAME,
+                                    SOURCE_AGENT_ID,
+                                    DESTINATION_PEER_ID,
+                                    DESTINATION_PEER_CALLER_NUM,
+                                    DESTINATION_PEER_CALLER_NAME,
+                                    UNIQUEID,
+                                    RECORD_FILE,
+                                    DESTINATION_QUEUE_ID,
+                                    DATE_START
+                                )
+                            VALUES
+                                (
+                                    "${CALL_TYPE}",
+                                    ${CALL_CENTER_ID},
+                                    "${CALL_CENTER_NAME}",
+                                    ${CUSTOMER_ID},
+                                    "${CUSTOMER_NAME}",
+                                    "${SOURCE_PEER_ID}",
+                                    "${SOURCE_PEER_CALLER_NUM}",
+                                    "${SOURCE_PEER_CALLER_NAME}",
+                                    ${SOURCE_AGENT_ID},
+                                    "${DESTINATION_PEER_ID}",
+                                    "${DESTINATION_PEER_CALLER_NUM}",
+                                    "${DESTINATION_PEER_CALLER_NAME}",
+                                    "${UNIQUEID}",
+                                    "${RECORD_FILE}",
+                                    ${DESTINATION_QUEUE_ID},
+                                    NOW()
+                                )
+                        `
+            await this.connection.beginTransaction()
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    async CALL_ANSWERED(objData){
+        console.log('callAnswer: ', objData);
+        const UNIQUEID = objData.UNIQUEID
+        try {
+            const query = ` UPDATE
+                                TB_CDR_TODAY
+                            SET
+                                DATE_ANSWER = NOW(),
+                                WAITING_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_START, DATE_ANSWER), TIMESTAMPDIFF(SECOND, DATE_START, NOW()))
+                            WHERE
+                                UNIQUEID = "${UNIQUEID}"
+                        `
+            await this.connection.beginTransaction()
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    async ANSWERED_QUEUE(objData){
+        console.log('answerQueue: ', objData);
+        const UNIQUEID = objData.UNIQUEID
+        let DESTINATION_AGENT_ID = objData.DESTINATION_AGENT_ID
+        if (DESTINATION_AGENT_ID.includes('/')){
+            const array = DESTINATION_AGENT_ID.split('/')
+            DESTINATION_AGENT_ID = array[1]
+        }
+        try {
+            const query = ` UPDATE
+                                TB_CDR_TODAY
+                            SET
+                                DATE_ANSWER = NOW(),
+                                WAITING_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_START, DATE_ANSWER), TIMESTAMPDIFF(SECOND, DATE_START, NOW())),
+                                DESTINATION_AGENT_ID=${DESTINATION_AGENT_ID}
+                            WHERE
+                                UNIQUEID = "${UNIQUEID}"
+                        `
+            await this.connection.beginTransaction()
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    async END_CALL(objData){
+        console.log('fim: ', objData);
+        const UNIQUEID = objData.UNIQUEID
+        try {
+            const query = ` UPDATE
+                                TB_CDR_TODAY
+                            SET
+                                DATE_END = NOW(),
+                                WAITING_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_START, DATE_ANSWER), TIMESTAMPDIFF(SECOND, DATE_START, NOW())),
+                                TALK_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_ANSWER, NOW()), 0),
+                                DURATION = TIMESTAMPDIFF(SECOND, DATE_START, NOW()),
+                                RECORD_FILE = REPLACE(RECORD_FILE, '.wav', '.mp3')
+                            WHERE
+                                UNIQUEID = "${UNIQUEID}"
+                        `
+            await this.connection.beginTransaction()
+            const results = await this.connection.execute(query)
+            await this.connection.commit()
+            return results
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+
+
 }
 
 module.exports = new AsteriskModel();
