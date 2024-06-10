@@ -4,6 +4,8 @@ const route = express.Router();
 const asteriskController = require('./controllers/asteriskController');
 
 route.post('/peers/readAll', asteriskController.peersReadAll);
+route.post('/agentLogin', asteriskController.agentLogin);
+route.post('/agentLogoff', asteriskController.agentLogoff);
 route.post('/update', asteriskController.update);
 route.post('/cdr/PEER_TO_PEER', asteriskController.PEER_TO_PEER);
 route.post('/cdr/PEER_TO_TRUNK', asteriskController.PEER_TO_TRUNK);

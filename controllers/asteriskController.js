@@ -12,6 +12,20 @@ exports.peersReadAll = (req,res) => {
     });
 }
 
+exports.agentLogin = (req,res) => {
+  const objData = req.body;
+  AsteriskModel.agentLogin(objData);
+  res.send('Dado Recebido');
+}
+
+
+exports.agentLogoff = (req,res) => {
+  const objData = req.body;
+  AsteriskModel.agentLogoff(objData);
+  res.send('Dado Recebido');
+}
+
+
 exports.update = (req,res) => {
   const objData = req.body;
   AsteriskModel.update(objData);
