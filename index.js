@@ -1,6 +1,12 @@
 const express = require('express');
 const port=2626;
 const app = express();
+const http = require('http');
+const WebSocket = require('ws');
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({server})
+
 const cors = require('cors');
 
 const corsOptions = {
@@ -18,7 +24,8 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 app.use(routes)
-app.listen(port, () => {
+server.listen(port, () => {
     console.log('Servidor executando na porta ' + port);
     console.log('http://localhost:'+port);
 })
+

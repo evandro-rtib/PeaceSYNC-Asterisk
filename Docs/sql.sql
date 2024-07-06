@@ -1,0 +1,259 @@
+-- MariaDB dump 10.19  Distrib 10.5.23-MariaDB, for debian-linux-gnu (x86_64)
+--
+-- Host: localhost    Database: ASTERISK
+-- ------------------------------------------------------
+-- Server version	10.5.23-MariaDB-0+deb11u1
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+--
+-- Current Database: `ASTERISK`
+--
+
+CREATE DATABASE /*!32312 IF NOT EXISTS*/ `ASTERISK` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci */;
+
+USE `ASTERISK`;
+
+--
+-- Table structure for table `TB_CDR`
+--
+
+DROP TABLE IF EXISTS `TB_CDR`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `TB_CDR` (
+  `CALL_CENTER_ID` int(11) DEFAULT NULL,
+  `CALL_CENTER_NAME` varchar(100) DEFAULT NULL,
+  `CUSTOMER_ID` int(11) DEFAULT NULL,
+  `CUSTOMER_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `UNIQUEID` varchar(80) DEFAULT NULL,
+  `CALL_TYPE` varchar(15) DEFAULT NULL,
+  `DESTINATION_QUEUE_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_QUEUE_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_POS_PEER` varchar(100) DEFAULT NULL,
+  `DATE_START` datetime DEFAULT NULL,
+  `DATE_ANSWER` datetime DEFAULT NULL,
+  `DATE_END` datetime DEFAULT NULL,
+  `WAITING_TIME` int(11) DEFAULT NULL,
+  `TALK_TIME` int(11) DEFAULT NULL,
+  `DURATION` int(11) DEFAULT NULL,
+  `RECORD_FILE` varchar(300) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `TB_CDR`
+--
+
+LOCK TABLES `TB_CDR` WRITE;
+/*!40000 ALTER TABLE `TB_CDR` DISABLE KEYS */;
+INSERT INTO `TB_CDR` VALUES (1000,'MP SISTEMAS',1001,'MP SISTEMAS','1000040','00700011','FACIAL RUA',NULL,'000','000','1719957025.3','PEER_TO_QUEUE','4',NULL,NULL,NULL,NULL,NULL,NULL,'2024-07-02 18:50:25',NULL,'2024-07-02 18:50:31',6,0,6,'/media/records/1000/1001/2024/07/02/1000040-000-1719957025.3.mp3');
+/*!40000 ALTER TABLE `TB_CDR` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `TB_CDR_FULL`
+--
+
+DROP TABLE IF EXISTS `TB_CDR_FULL`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `TB_CDR_FULL` (
+  `CALL_CENTER_ID` int(11) DEFAULT NULL,
+  `CALL_CENTER_NAME` varchar(100) DEFAULT NULL,
+  `CUSTOMER_ID` int(11) DEFAULT NULL,
+  `CUSTOMER_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `UNIQUEID` varchar(80) DEFAULT NULL,
+  `CALL_TYPE` varchar(15) DEFAULT NULL,
+  `DESTINATION_QUEUE_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_QUEUE_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_POS_PEER` varchar(100) DEFAULT NULL,
+  `DATE_START` datetime DEFAULT NULL,
+  `DATE_ANSWER` datetime DEFAULT NULL,
+  `DATE_END` datetime DEFAULT NULL,
+  `WAITING_TIME` int(11) DEFAULT NULL,
+  `TALK_TIME` int(11) DEFAULT NULL,
+  `DURATION` int(11) DEFAULT NULL,
+  `RECORD_FILE` varchar(300) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `TB_CDR_FULL`
+--
+
+LOCK TABLES `TB_CDR_FULL` WRITE;
+/*!40000 ALTER TABLE `TB_CDR_FULL` DISABLE KEYS */;
+/*!40000 ALTER TABLE `TB_CDR_FULL` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `TB_CDR_TODAY`
+--
+
+DROP TABLE IF EXISTS `TB_CDR_TODAY`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `TB_CDR_TODAY` (
+  `CALL_CENTER_ID` int(11) DEFAULT NULL,
+  `CALL_CENTER_NAME` varchar(100) DEFAULT NULL,
+  `CUSTOMER_ID` int(11) DEFAULT NULL,
+  `CUSTOMER_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `SOURCE_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NUM` varchar(100) DEFAULT NULL,
+  `DESTINATION_PEER_CALLER_NAME` varchar(100) DEFAULT NULL,
+  `UNIQUEID` varchar(80) DEFAULT NULL,
+  `CALL_TYPE` varchar(15) DEFAULT NULL,
+  `DESTINATION_QUEUE_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_QUEUE_NAME` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_ID` varchar(100) DEFAULT NULL,
+  `SOURCE_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_ID` varchar(100) DEFAULT NULL,
+  `DESTINATION_AGENT_NAME` varchar(100) DEFAULT NULL,
+  `DESTINATION_POS_PEER` varchar(100) DEFAULT NULL,
+  `DATE_START` datetime DEFAULT NULL,
+  `DATE_ANSWER` datetime DEFAULT NULL,
+  `DATE_END` datetime DEFAULT NULL,
+  `WAITING_TIME` int(11) DEFAULT NULL,
+  `TALK_TIME` int(11) DEFAULT NULL,
+  `DURATION` int(11) DEFAULT NULL,
+  `RECORD_FILE` varchar(300) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `TB_CDR_TODAY`
+--
+
+LOCK TABLES `TB_CDR_TODAY` WRITE;
+/*!40000 ALTER TABLE `TB_CDR_TODAY` DISABLE KEYS */;
+/*!40000 ALTER TABLE `TB_CDR_TODAY` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `TB_EQUIPAMENT`
+--
+
+DROP TABLE IF EXISTS `TB_EQUIPAMENT`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `TB_EQUIPAMENT` (
+  `EQUIPAMENT_ID` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `TB_EQUIPAMENT`
+--
+
+LOCK TABLES `TB_EQUIPAMENT` WRITE;
+/*!40000 ALTER TABLE `TB_EQUIPAMENT` DISABLE KEYS */;
+/*!40000 ALTER TABLE `TB_EQUIPAMENT` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `TB_EQUIPMENT`
+--
+
+DROP TABLE IF EXISTS `TB_EQUIPMENT`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `TB_EQUIPMENT` (
+  `EQUIPMENT_ID` int(11) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `TB_EQUIPMENT`
+--
+
+LOCK TABLES `TB_EQUIPMENT` WRITE;
+/*!40000 ALTER TABLE `TB_EQUIPMENT` DISABLE KEYS */;
+INSERT INTO `TB_EQUIPMENT` VALUES (1003);
+/*!40000 ALTER TABLE `TB_EQUIPMENT` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `cdr`
+--
+
+DROP TABLE IF EXISTS `cdr`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `cdr` (
+  `calldate` datetime NOT NULL,
+  `clid` varchar(80) NOT NULL,
+  `src` varchar(80) NOT NULL,
+  `dst` varchar(80) NOT NULL,
+  `dcontext` varchar(80) NOT NULL,
+  `channel` varchar(80) NOT NULL,
+  `dstchannel` varchar(80) NOT NULL,
+  `lastapp` varchar(80) NOT NULL,
+  `lastdata` varchar(80) NOT NULL,
+  `duration` int(11) NOT NULL,
+  `billsec` int(11) NOT NULL,
+  `disposition` varchar(45) NOT NULL,
+  `amaflags` int(11) NOT NULL,
+  `accountcode` varchar(20) NOT NULL,
+  `uniqueid` varchar(32) NOT NULL,
+  `userfield` varchar(255) NOT NULL,
+  `peeraccount` varchar(20) NOT NULL,
+  `linkedid` varchar(32) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `cdr`
+--
+
+LOCK TABLES `cdr` WRITE;
+/*!40000 ALTER TABLE `cdr` DISABLE KEYS */;
+/*!40000 ALTER TABLE `cdr` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Dumping routines for database 'ASTERISK'
+--
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2024-07-06 11:31:43

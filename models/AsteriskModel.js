@@ -6,6 +6,8 @@ const hubConfig = require('../configs/hub')
 const axios = require('axios');
 const hub = require('../configs/hub');
 const { exec } = require('child_process');
+const AsteriskManager = require('asterisk-manager');
+const amiConfig = require('../configs/ami')
 
 
 class AsteriskModel {
@@ -16,17 +18,43 @@ class AsteriskModel {
         this.folder_globals = `${this.folder_asterisk}/globals`;
         this.folder_scripts = `${this.folder_asterisk}/scripts`;
         this.folder_scripts = `${this.folder_asterisk}/python`;
-        this.connection = null
-        this.initConnection()
+        this.EQUIPMENT_ID = 0;
+        this.pool = null;
+        this.connection = null;
+        this.initConnection();
+        this.initAMI();
+        
+        this.peers = {};
+        this.peersSend = {};
+        this.sendPeersStatus = false;
+
     }
 
-    async initConnection() {
-        try {
-            const pool = await mariadb.createPool(dbConfig)
-            this.connection = await pool.getConnection()
-        } catch (error) {
-            console.log(error)
-        }
+    
+  async initConnection() {
+    try {
+      this.pool = mariadb.createPool(dbConfig);
+      this.connection = await this.pool.getConnection();
+      this.get_Equipament();
+    } catch (error) {
+      console.log(error)
+    }
+  }
+
+  async checkConnection() {
+    try {
+      if (!this.connection || !this.connection.isValid()) {
+        if (this.connection) await this.connection.end();
+        this.connection = await this.pool.getConnection();
+      }
+    } catch (error) {
+      console.log('Error reconnecting to the database:', error);
+      throw error;
+    }
+  }
+
+    validString(string){
+        return typeof string === 'string' && string.trim().length > 0;
     }
 
     async prepareBasicFolders() {
@@ -442,6 +470,7 @@ class AsteriskModel {
     }
 
     async get_Equipament() {
+        await this.checkConnection();
         const query = `   SELECT
                                 EQUIPMENT_ID
                             FROM
@@ -449,10 +478,11 @@ class AsteriskModel {
                             LIMIT 1
                         `
         const result = await this.connection.execute(query)
+        
         if (result.length > 0)
-            return result[0]
+            this.EQUIPMENT_ID = result[0].EQUIPMENT_ID;
         else
-            return 0
+            this.EQUIPMENT_ID = 0;
     }
 
     async converterWavToMp3(source) {
@@ -470,11 +500,123 @@ class AsteriskModel {
         });
     };
 
+    initAMI() {
+        this.ami = new AsteriskManager(amiConfig.port, amiConfig.host, amiConfig.user, amiConfig.password, false);
+
+        this.ami.on('managerevent', (event) => {
+            if (event.event === 'EndpointList'){
+                if (!this.peers[event.objectname]){
+                    this.peers[event.objectname]= {TECNOLOGY: 'PJSIP', STATUS: null,PEER_ID: event.objectname};
+                    const statusPeers = event.devicestate === 'Unavailable' || event.devicestate === 'Uniregistred' ?  false : true;
+                    if ( this.peers[event.objectname].STATUS != statusPeers){
+                        this.peers[event.objectname].STATUS = statusPeers;
+                        this.peersSend[event.objectname] = this.peers[event.objectname];
+                        this.sendPeersStatus = true;
+                    }
+                }
+                
+            }
+
+        });
+        
+
+        this.ami.on('error', (err) => {
+            //console.error('AMI Error:', err);
+        });
+
+        this.ami.on('disconnect', () => {
+            //console.error('AMI Disconnected');
+            this.reconnectAMI();
+            this.stopListPeersInterval();
+        });
+
+        this.ami.on('connect', () => {
+            this.startListPeersInterval();
+        });
+
+        this.connectAMI();
+    }
+
+    connectAMI() {
+        this.ami.connect((err) => {
+            if (err) {
+                console.error('Error connecting to AMI:', err);
+                this.reconnectAMI();
+                this.stopListPeersInterval();
+            } else {
+                console.log('Connected to AMI');
+                this.startListPeersInterval();
+            }
+        });
+    }
+
+    reconnectAMI() {
+        setTimeout(() => {
+            console.log('Reconnecting to AMI...');
+            this.connectAMI();
+        }, this.reconnectInterval);
+    }
+
+    startListPeersInterval() {
+        this.listPeersInterval = setInterval(async () => {
+            await new Promise((resolve, reject) => {
+                this.ami.action({
+                    action: 'PJSIPShowEndpoints'
+                }, (err, res) => {
+                    if (err) {
+                        console.error('PJSIPShowEndpoints Error:', err);
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
+            });
+            if (this.sendPeersStatus){
+                const objData = [];
+                
+                for (const peerId in this.peersSend) {
+                    const peer = this.peersSend[peerId];
+                    const data = {
+                        TECNOLOGY: peer.TECNOLOGY,
+                        PEER_ID : peer.PEER_ID,
+                        STATUS: peer.STATUS
+                    }
+                    objData.push(data)
+                }    
+                const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
+                axios.post(`${url}`, objData);
+                this.sendPeersStatus = false;
+                this.peersSend = {};
+            } 
+        }, 30000); 
+    }
+
+    stopListPeersInterval() {
+        if (this.listPeersInterval) {
+            clearInterval(this.listPeersInterval);
+            this.listPeersInterval = null;
+        }
+    }
+
+    async listPeersStatus() {
+
+        return [];
+    }
+
+    updatePeerStatus(peer, status) {
+        const existingPeer = this.peersStatus.find(p => p.PEER_ID === peer);
+        if (existingPeer) {
+            existingPeer.PEER_STATUS = status;
+        } else {
+            this.peersStatus.push({ PEER_ID: peer, PEER_STATUS: status });
+        }
+        console.log(`Peer ${peer} is now ${status}`);
+    }
+
     async agentLogin(objData) {
         const AGENT_NAME = objData.AGENT_NAME;
         const PEER_ID = objData.PEER_ID;
         const command = `asterisk -rx 'database put AGENTS ${PEER_ID}/AGENT_NAME \"${AGENT_NAME}\"'`
-        console.log(command)
         await this.executeCommand(command);
         return []
     }
@@ -486,24 +628,56 @@ class AsteriskModel {
         return []
     }
 
-    async PEER_TO_PEER(objData) {
-        let equipment = await this.get_Equipament()
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
-        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
-        const CALL_CENTER_ID = objData.CALL_CENTER_ID
-        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
-        const CUSTOMER_ID = objData.CUSTOMER_ID
-        const CUSTOMER_NAME = objData.CUSTOMER_NAME
-        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
-        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
-        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
-        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
-        const UNIQUEID = objData.UNIQUEID
-        const RECORD_FILE = objData.RECORD_FILE
-        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
+    async originate(objData) {
+        const PEER_ID = objData.PEER_ID;
+        const TECNOLOGY = objData.TECNOLOGY;
+        const CONTEXT_ID = objData.CONTEXT_ID;
+        const EXTEN = objData.EXTEN;
+        const callerid = objData.callerid ? objData.callerid : objData.EXTEN;
+        //const command = `asterisk -rx 'channel originate ${TECNOLOGY}/${PEER_ID} extension ${EXTEN}@${CONTEXT_ID} callerid ${callerid}'`
+        if (PEER_ID && TECNOLOGY && CONTEXT_ID && EXTEN && callerid){
+            this.ami.action({
+                action: 'Originate',
+                channel: `${TECNOLOGY}/${PEER_ID}`,
+                context: CONTEXT_ID,
+                exten: EXTEN,
+                priority: 1,
+                callerid: callerid,
+                timeout: 30000,
+                async: true
+            }, (err, res) => {
+                if (err) {
+                    console.error('Originate Error:', err);
+                } else {
+                    console.log('Originate Response:', res);
+                }
+            });
+        } else {
+            console.error('Missing required parameters');
+        }
+        return [];
+    }
 
+    async PEER_TO_PEER(objData) {
+        await this.checkConnection();
+        
+        const EQUIPMENT_ID = this.EQUIPMENT_ID;
+        const CALL_TYPE = objData.CALL_TYPE;
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID;
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME;
+        const CUSTOMER_ID = objData.CUSTOMER_ID;
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME;
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME;
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : null;
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM;
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME;
+        const UNIQUEID = objData.UNIQUEID;
+        const RECORD_FILE = objData.RECORD_FILE;
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
+        const DESTINATION_AGENT_NAME = this.validString(objData.DESTINATION_AGENT_NAME)  ? objData.DESTINATION_AGENT_NAME : null;
         try {
             const confData = {
                 EQUIPMENT_ID: EQUIPMENT_ID,
@@ -512,6 +686,7 @@ class AsteriskModel {
                 CALL_CENTER_NAME: CALL_CENTER_NAME,
                 CUSTOMER_ID: CUSTOMER_ID,
                 CUSTOMER_NAME: CUSTOMER_NAME,
+                SOURCE_AGENT_NAME: SOURCE_AGENT_NAME,
                 SOURCE_PEER_ID: SOURCE_PEER_ID,
                 SOURCE_PEER_CALLER_NUM: SOURCE_PEER_CALLER_NUM,
                 SOURCE_PEER_CALLER_NAME: SOURCE_PEER_CALLER_NAME,
@@ -520,7 +695,8 @@ class AsteriskModel {
                 DESTINATION_PEER_CALLER_NUM: DESTINATION_PEER_CALLER_NUM,
                 DESTINATION_PEER_CALLER_NAME: DESTINATION_PEER_CALLER_NAME,
                 UNIQUEID: UNIQUEID,
-                RECORD_FILE: RECORD_FILE
+                RECORD_FILE: RECORD_FILE,
+                DESTINATION_AGENT_NAME: DESTINATION_AGENT_NAME
             }
             const url = `http://${hub.host}:${hub.port}/asterisk/cdr/PEER_TO_PEER`;
             const response = await axios.post(`${url}`, confData);
@@ -538,6 +714,7 @@ class AsteriskModel {
                                     CUSTOMER_ID,
                                     CUSTOMER_NAME,
                                     SOURCE_PEER_ID,
+                                    SOURCE_AGENT_NAME,
                                     SOURCE_PEER_CALLER_NUM,
                                     SOURCE_PEER_CALLER_NAME,
                                     SOURCE_AGENT_ID,
@@ -546,7 +723,8 @@ class AsteriskModel {
                                     DESTINATION_PEER_CALLER_NAME,
                                     UNIQUEID,
                                     RECORD_FILE,
-                                    DATE_START
+                                    DATE_START,
+                                    DESTINATION_AGENT_NAME
                                 )
                             VALUES
                                 (
@@ -555,20 +733,21 @@ class AsteriskModel {
                                     "${CALL_CENTER_NAME}",
                                     ${CUSTOMER_ID},
                                     "${CUSTOMER_NAME}",
+                                    ${SOURCE_AGENT_NAME ? `"${SOURCE_AGENT_NAME}"` : 'NULL'},
                                     "${SOURCE_PEER_ID}",
                                     "${SOURCE_PEER_CALLER_NUM}",
                                     "${SOURCE_PEER_CALLER_NAME}",
-                                    ${SOURCE_AGENT_ID},
-                                    "${DESTINATION_PEER_ID}",
+                                    ${SOURCE_AGENT_ID ? `"${SOURCE_AGENT_ID}"` : 'NULL'},
+                                    ${DESTINATION_PEER_ID ? `"${DESTINATION_PEER_ID}"` : 'NULL'},
                                     "${DESTINATION_PEER_CALLER_NUM}",
                                     "${DESTINATION_PEER_CALLER_NAME}",
                                     "${UNIQUEID}",
                                     "${RECORD_FILE}",
-                                    NOW()
+                                    NOW(),
+                                    ${DESTINATION_AGENT_NAME ? `"${DESTINATION_AGENT_NAME}"` : 'NULL'}
                                 )
                         `
             await this.connection.beginTransaction()
-            console.log(query);
             const results = await this.connection.execute(query)
             await this.connection.commit()
             return results
@@ -578,23 +757,25 @@ class AsteriskModel {
     }
 
     async PEER_TO_TRUNK(objData) {
-        let equipment = await this.get_Equipament()
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
-        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
-        const CALL_CENTER_ID = objData.CALL_CENTER_ID
-        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
-        const CUSTOMER_ID = objData.CUSTOMER_ID
-        const CUSTOMER_NAME = objData.CUSTOMER_NAME
-        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
-        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
-        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
-        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
-        const UNIQUEID = objData.UNIQUEID
-        const RECORD_FILE = objData.RECORD_FILE
-        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
-        const DESTINATION_POS_PEER = objData.DESTINATION_POS_PEER
+        await this.checkConnection();
+        
+        const EQUIPMENT_ID = this.EQUIPMENT_ID;
+        const CALL_TYPE = objData.CALL_TYPE;
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID;
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME;
+        const CUSTOMER_ID = objData.CUSTOMER_ID;
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME;
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME;
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : null;
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM;
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME;
+        const UNIQUEID = objData.UNIQUEID;
+        const RECORD_FILE = objData.RECORD_FILE;
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
+        const DESTINATION_POS_PEER = objData.DESTINATION_POS_PEER;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
 
         try {
             const confData = {
@@ -672,23 +853,25 @@ class AsteriskModel {
     }
 
     async PEER_TO_QUEUE(objData) {
-        let equipment = await this.get_Equipament() 
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
-        const CALL_TYPE = objData.CALL_TYPE ? objData.CALL_TYPE : 'NULL'
-        const CALL_CENTER_ID = objData.CALL_CENTER_ID
-        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME
-        const CUSTOMER_ID = objData.CUSTOMER_ID
-        const CUSTOMER_NAME = objData.CUSTOMER_NAME
-        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID > 0 ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM
-        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME
-        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : 'NULL'
-        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM
-        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME
-        const UNIQUEID = objData.UNIQUEID
-        const RECORD_FILE = objData.RECORD_FILE
-        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : 'NULL'
-        const DESTINATION_QUEUE_ID = objData.DESTINATION_QUEUE_ID
+        await this.checkConnection();
+         ;
+        const EQUIPMENT_ID = this.EQUIPMENT_ID;
+        const CALL_TYPE = objData.CALL_TYPE;
+        const CALL_CENTER_ID = objData.CALL_CENTER_ID;
+        const CALL_CENTER_NAME = objData.CALL_CENTER_NAME;
+        const CUSTOMER_ID = objData.CUSTOMER_ID;
+        const CUSTOMER_NAME = objData.CUSTOMER_NAME;
+        const SOURCE_PEER_ID = objData.SOURCE_PEER_ID ? objData.SOURCE_PEER_ID : objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NUM = objData.SOURCE_PEER_CALLER_NUM;
+        const SOURCE_PEER_CALLER_NAME = objData.SOURCE_PEER_CALLER_NAME;
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID > 0 ? objData.DESTINATION_PEER_ID : null;
+        const DESTINATION_PEER_CALLER_NUM = objData.DESTINATION_PEER_CALLER_NUM;
+        const DESTINATION_PEER_CALLER_NAME = objData.DESTINATION_PEER_CALLER_NAME;
+        const UNIQUEID = objData.UNIQUEID;
+        const RECORD_FILE = objData.RECORD_FILE;
+        const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
+        const DESTINATION_QUEUE_ID = objData.DESTINATION_QUEUE_ID;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
 
         try {
             const confData = {
@@ -707,7 +890,8 @@ class AsteriskModel {
                 DESTINATION_PEER_CALLER_NAME: DESTINATION_PEER_CALLER_NAME,
                 UNIQUEID: UNIQUEID,
                 RECORD_FILE: RECORD_FILE,
-                DESTINATION_QUEUE_ID: DESTINATION_QUEUE_ID
+                DESTINATION_QUEUE_ID: DESTINATION_QUEUE_ID,
+                SOURCE_AGENT_NAME: SOURCE_AGENT_NAME
             }
             const url = `http://${hub.host}:${hub.port}/asterisk/cdr/PEER_TO_QUEUE`;
             const response = await axios.post(`${url}`, confData);
@@ -724,6 +908,7 @@ class AsteriskModel {
                                     CALL_CENTER_NAME,
                                     CUSTOMER_ID,
                                     CUSTOMER_NAME,
+                                    SOURCE_AGENT_NAME,
                                     SOURCE_PEER_ID,
                                     SOURCE_PEER_CALLER_NUM,
                                     SOURCE_PEER_CALLER_NAME,
@@ -743,11 +928,12 @@ class AsteriskModel {
                                     "${CALL_CENTER_NAME}",
                                     ${CUSTOMER_ID},
                                     "${CUSTOMER_NAME}",
+                                    ${SOURCE_AGENT_NAME ? `"${SOURCE_AGENT_NAME}"` : 'NULL'},
                                     "${SOURCE_PEER_ID}",
                                     "${SOURCE_PEER_CALLER_NUM}",
                                     "${SOURCE_PEER_CALLER_NAME}",
-                                    ${SOURCE_AGENT_ID},
-                                    "${DESTINATION_PEER_ID}",
+                                    ${SOURCE_AGENT_ID ? `"${SOURCE_AGENT_ID}"` : 'NULL'},
+                                    ${DESTINATION_PEER_ID ? `"${DESTINATION_PEER_ID}"` : 'NULL'},
                                     "${DESTINATION_PEER_CALLER_NUM}",
                                     "${DESTINATION_PEER_CALLER_NAME}",
                                     "${UNIQUEID}",
@@ -766,10 +952,10 @@ class AsteriskModel {
     }
 
     async CALL_ANSWERED(objData) {
-        let equipment = await this.get_Equipament()
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
+        await this.checkConnection();
+        
+        const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
-
         try {
             const confData = {
                 EQUIPMENT_ID: EQUIPMENT_ID,
@@ -800,20 +986,17 @@ class AsteriskModel {
     }
 
     async ANSWERED_QUEUE(objData) {
-        let equipment = await this.get_Equipament()
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
+        await this.checkConnection();
+        
+        const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
         const DESTINATION_AGENT_NAME = objData.DESTINATION_AGENT_NAME
-        let DESTINATION_AGENT_ID = objData.DESTINATION_AGENT_ID
-        if (DESTINATION_AGENT_ID.includes('/')) {
-            const array = DESTINATION_AGENT_ID.split('/')
-            DESTINATION_AGENT_ID = array[1]
-        }
+        const DESTINATION_PEER_ID = objData.DESTINATION_PEER_ID
         try {
             const confData = {
                 EQUIPMENT_ID: EQUIPMENT_ID,
                 UNIQUEID: UNIQUEID,
-                DESTINATION_AGENT_ID: DESTINATION_AGENT_ID,
+                DESTINATION_PEER_ID: DESTINATION_PEER_ID,
                 DESTINATION_AGENT_NAME: DESTINATION_AGENT_NAME
             }
             const url = `http://${hub.host}:${hub.port}/asterisk/cdr/ANSWERED_QUEUE`;
@@ -828,8 +1011,8 @@ class AsteriskModel {
                             SET
                                 DATE_ANSWER = NOW(),
                                 WAITING_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_START, DATE_ANSWER), TIMESTAMPDIFF(SECOND, DATE_START, NOW())),
-                                DESTINATION_AGENT_ID=${DESTINATION_AGENT_ID}
-                                ${DESTINATION_AGENT_NAME?`,DESTINATION_AGENT_NAME=${DESTINATION_AGENT_NAME}`: ''}
+                                DESTINATION_PEER_ID=${DESTINATION_PEER_ID}
+                                ${DESTINATION_AGENT_NAME?`,DESTINATION_AGENT_NAME="${DESTINATION_AGENT_NAME}"`: ''}
                             WHERE
                                 UNIQUEID = "${UNIQUEID}"
                         `
@@ -843,8 +1026,9 @@ class AsteriskModel {
     }
 
     async END_CALL(objData) {
-        let equipment = await this.get_Equipament()
-        const EQUIPMENT_ID = equipment.EQUIPMENT_ID
+        await this.checkConnection();
+        
+        const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
         try {
             const query = ` SELECT
