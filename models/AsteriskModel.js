@@ -27,7 +27,7 @@ class AsteriskModel {
         this.peers = {};
         this.peersSend = {};
         this.sendPeersStatus = false;
-
+        this.count = 0;
     }
 
     
@@ -559,6 +559,8 @@ class AsteriskModel {
 
     startListPeersInterval() {
         this.listPeersInterval = setInterval(async () => {
+            console.log(this.count);
+            this.count++;
             await new Promise((resolve, reject) => {
                 this.ami.action({
                     action: 'PJSIPShowEndpoints'
@@ -571,6 +573,7 @@ class AsteriskModel {
                     }
                 });
             });
+
             if (this.sendPeersStatus){
                 const objData = [];
                 
@@ -585,11 +588,10 @@ class AsteriskModel {
                 }    
                 const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
                 axios.post(`${url}`, objData);
-                console.log(objData);
                 this.sendPeersStatus = false;
                 this.peersSend = {};
             } 
-        }, 600000); 
+        }, 60000); 
     }
 
     stopListPeersInterval() {
