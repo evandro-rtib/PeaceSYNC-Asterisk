@@ -585,10 +585,11 @@ class AsteriskModel {
                 }    
                 const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
                 axios.post(`${url}`, objData);
+                console.log(objData);
                 this.sendPeersStatus = false;
                 this.peersSend = {};
             } 
-        }, 30000); 
+        }, 600000); 
     }
 
     stopListPeersInterval() {
@@ -610,7 +611,6 @@ class AsteriskModel {
         } else {
             this.peersStatus.push({ PEER_ID: peer, PEER_STATUS: status });
         }
-        console.log(`Peer ${peer} is now ${status}`);
     }
 
     async agentLogin(objData) {
