@@ -18,6 +18,7 @@ class AsteriskModel {
         this.folder_globals = `${this.folder_asterisk}/globals`;
         this.folder_scripts = `${this.folder_asterisk}/scripts`;
         this.folder_scripts = `${this.folder_asterisk}/python`;
+        this.peersHUB = [];
         this.EQUIPMENT_ID = 0;
         this.pool = null;
         this.connection = null;
@@ -507,16 +508,19 @@ class AsteriskModel {
             if (event.event === 'EndpointList'){
                 if (!this.peers[event.objectname]){
                     this.peers[event.objectname]= {TECNOLOGY: 'PJSIP', STATUS: null,PEER_ID: event.objectname};
-                    const statusPeers = event.devicestate === 'Unavailable' || event.devicestate === 'Uniregistred' ?  false : true;
-                    if ( this.peers[event.objectname].STATUS != statusPeers){
-                        this.peers[event.objectname].STATUS = statusPeers;
-                        this.peersSend[event.objectname] = this.peers[event.objectname];
-                        this.sendPeersStatus = true;
-                    }
                 }
-                
-            }
+                const statusPeers = event.devicestate === 'Unavailable' || event.devicestate === 'Uniregistred' ?  false : true;
+                if ( this.peers[event.objectname].STATUS != statusPeers){
+                    this.peers[event.objectname].STATUS = statusPeers;
+                }
 
+                if( this.peersHUB[event.objectname] &&
+                    this.peers[event.objectname].STATUS != this.peersHUB[event.objectname].STATUS
+                ){
+                    this.peersSend[event.objectname] = this.peers[event.objectname];
+                    this.sendPeersStatus = true;
+                }
+            }
         });
         
 
@@ -525,12 +529,13 @@ class AsteriskModel {
         });
 
         this.ami.on('disconnect', () => {
-            //console.error('AMI Disconnected');
+            console.error('AMI Disconnected');
             this.reconnectAMI();
             this.stopListPeersInterval();
         });
 
         this.ami.on('connect', () => {
+            console.log('AMI Connected');
             this.startListPeersInterval();
         });
 
@@ -559,7 +564,6 @@ class AsteriskModel {
 
     startListPeersInterval() {
         this.listPeersInterval = setInterval(async () => {
-            console.log(this.count);
             this.count++;
             await new Promise((resolve, reject) => {
                 this.ami.action({
@@ -585,13 +589,36 @@ class AsteriskModel {
                         STATUS: peer.STATUS
                     }
                     objData.push(data)
-                }    
+                }
+                console.log('enviou', objData);
                 const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
                 axios.post(`${url}`, objData);
                 this.sendPeersStatus = false;
                 this.peersSend = {};
             } 
-        }, 60000); 
+
+            if(this.EQUIPMENT_ID > 0){
+                const url = `http://${hub.host}:${hub.port}/peers/readStatus`;
+                const objData = {EQUIPMENT_ID: this.EQUIPMENT_ID};
+                axios.post(`${url}`, objData)
+                .then(res => {
+                    if (res.data && res.data.length > 0){
+                        this.peersHUB = res.data.reduce((acc, peer) => {
+                            acc[peer.PEER_ID] = {
+                              TECNOLOGY: peer.TECNOLOGY,
+                              STATUS: peer.STATUS === 1,
+                              PEER_ID: String(peer.PEER_ID),
+                            };
+                            return acc;
+                          }, {});
+                    }
+                })
+                .catch(err => {
+                    console.log('error: ', err);
+                });
+            }
+
+        }, 3000); 
     }
 
     stopListPeersInterval() {
@@ -1085,3 +1112,4 @@ class AsteriskModel {
 }
 
 module.exports = new AsteriskModel();
+
