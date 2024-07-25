@@ -6,6 +6,8 @@ const hubConfig = require('../configs/hub')
 const axios = require('axios');
 const hub = require('../configs/hub');
 const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 const AsteriskManager = require('asterisk-manager');
 const amiConfig = require('../configs/ami')
 
@@ -24,37 +26,37 @@ class AsteriskModel {
         this.connection = null;
         this.initConnection();
         this.initAMI();
-        
+
         this.peers = {};
         this.peersSend = {};
         this.sendPeersStatus = false;
         this.count = 0;
     }
 
-    
-  async initConnection() {
-    try {
-      this.pool = mariadb.createPool(dbConfig);
-      this.connection = await this.pool.getConnection();
-      this.get_Equipament();
-    } catch (error) {
-      console.log(error)
-    }
-  }
 
-  async checkConnection() {
-    try {
-      if (!this.connection || !this.connection.isValid()) {
-        if (this.connection) await this.connection.end();
-        this.connection = await this.pool.getConnection();
-      }
-    } catch (error) {
-      console.log('Error reconnecting to the database:', error);
-      throw error;
+    async initConnection() {
+        try {
+            this.pool = mariadb.createPool(dbConfig);
+            this.connection = await this.pool.getConnection();
+            this.get_Equipament();
+        } catch (error) {
+            console.log(error)
+        }
     }
-  }
 
-    validString(string){
+    async checkConnection() {
+        try {
+            if (!this.connection || !this.connection.isValid()) {
+                if (this.connection) await this.connection.end();
+                this.connection = await this.pool.getConnection();
+            }
+        } catch (error) {
+            console.log('Error reconnecting to the database:', error);
+            throw error;
+        }
+    }
+
+    validString(string) {
         return typeof string === 'string' && string.trim().length > 0;
     }
 
@@ -239,8 +241,11 @@ class AsteriskModel {
         const queueConfiguration = `
                                         [${queueData.ID}] ; ${queueData.QUEUE_NAME}
                                         strategy=${queueData.STRATEGY}
+                                        wrapuptime=${queueData.WRAPUPTIME}
+                                        timeout=${queueData.TIMEOUT}
                                         setinterfacevar=yes
                                         setqueuevar=yes
+                                        autofill=no
                                         ${associatedPeers}
                                     `
         dataQueue.push(await this.cleanLines(queueConfiguration))
@@ -379,6 +384,7 @@ class AsteriskModel {
     }
 
     async update(objData) {
+        await this.checkConnection();
         try {
             if (objData.EQUIPMENT_ID) {
                 let query = ` DELETE FROM
@@ -479,50 +485,69 @@ class AsteriskModel {
                             LIMIT 1
                         `
         const result = await this.connection.execute(query)
-        
+
         if (result.length > 0)
             this.EQUIPMENT_ID = result[0].EQUIPMENT_ID;
         else
             this.EQUIPMENT_ID = 0;
     }
 
+    // async converterWavToMp3(source) {
+    //     if (source) {
+
+    //         const command = `/bin/bash /etc/asterisk/scripts/converterWavToMp3.sh ${source}`;
+    //         exec(command, (error, stdout, stderr) => {
+    //             if (error) {
+    //                 console.error(`Erro ao converter: ${error.message}`);
+    //                 return;
+    //             }
+    //             if (stderr) {
+    //                 console.error(`Erro ao converter: ${stderr}`);
+    //                 return;
+    //             }
+    //             console.log(`Conversão finalizada: ${stdout}`);
+    //         });
+    //     }
+    // };
+
     async converterWavToMp3(source) {
-        const command = `/bin/bash /etc/asterisk/scripts/converterWavToMp3.sh ${source}`;
-        exec(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Erro ao converter: ${error.message}`);
-                return;
-            }
-            if (stderr) {
-                console.error(`Erro ao converter: ${stderr}`);
-                return;
-            }
-            console.log(`Conversão finalizada: ${stdout}`);
-        });
-    };
+        if (source) {
+            const command = `/bin/bash /etc/asterisk/scripts/converterWavToMp3.sh ${source}`;
+            setTimeout(() => {
+                exec(command, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Erro ao converter: ${error.message}`);
+                        return;
+                    }
+                    if (stderr) {
+                        console.error(`Erro ao converter: ${stderr}`);
+                        return;
+                    }
+                    console.log(`Conversão finalizada: ${stdout}`);
+                });
+            }, 3000);
+        }
+    }
 
     initAMI() {
         this.ami = new AsteriskManager(amiConfig.port, amiConfig.host, amiConfig.user, amiConfig.password, false);
 
         this.ami.on('managerevent', (event) => {
-            if (event.event === 'EndpointList'){
-                if (!this.peers[event.objectname]){
-                    this.peers[event.objectname]= {TECNOLOGY: 'PJSIP', STATUS: null,PEER_ID: event.objectname};
-                }
-                const statusPeers = event.devicestate === 'Unavailable' || event.devicestate === 'Uniregistred' ?  false : true;
-                if ( this.peers[event.objectname].STATUS != statusPeers){
-                    this.peers[event.objectname].STATUS = statusPeers;
+            if (event.event === 'EndpointList') {
+                if (!this.peers[event.objectname]) {
+                    this.peers[event.objectname] = { TECNOLOGY: 'PJSIP', STATUS: null, PEER_ID: event.objectname };
+                    const statusPeers = event.devicestate === 'Unavailable' || event.devicestate === 'Uniregistred' ? false : true;
+                    if (this.peers[event.objectname].STATUS != statusPeers) {
+                        this.peers[event.objectname].STATUS = statusPeers;
+                        this.peersSend[event.objectname] = this.peers[event.objectname];
+                        this.sendPeersStatus = true;
+                    }
                 }
 
-                if( this.peersHUB[event.objectname] &&
-                    this.peers[event.objectname].STATUS != this.peersHUB[event.objectname].STATUS
-                ){
-                    this.peersSend[event.objectname] = this.peers[event.objectname];
-                    this.sendPeersStatus = true;
-                }
             }
+
         });
-        
+
 
         this.ami.on('error', (err) => {
             //console.error('AMI Error:', err);
@@ -578,47 +603,24 @@ class AsteriskModel {
                 });
             });
 
-            if (this.sendPeersStatus){
+            if (this.sendPeersStatus) {
                 const objData = [];
-                
+
                 for (const peerId in this.peersSend) {
                     const peer = this.peersSend[peerId];
                     const data = {
                         TECNOLOGY: peer.TECNOLOGY,
-                        PEER_ID : peer.PEER_ID,
+                        PEER_ID: peer.PEER_ID,
                         STATUS: peer.STATUS
                     }
                     objData.push(data)
-                }
-                console.log('enviou', objData);
+                }    
                 const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
                 axios.post(`${url}`, objData);
                 this.sendPeersStatus = false;
                 this.peersSend = {};
             } 
-
-            if(this.EQUIPMENT_ID > 0){
-                const url = `http://${hub.host}:${hub.port}/peers/readStatus`;
-                const objData = {EQUIPMENT_ID: this.EQUIPMENT_ID};
-                axios.post(`${url}`, objData)
-                .then(res => {
-                    if (res.data && res.data.length > 0){
-                        this.peersHUB = res.data.reduce((acc, peer) => {
-                            acc[peer.PEER_ID] = {
-                              TECNOLOGY: peer.TECNOLOGY,
-                              STATUS: peer.STATUS === 1,
-                              PEER_ID: String(peer.PEER_ID),
-                            };
-                            return acc;
-                          }, {});
-                    }
-                })
-                .catch(err => {
-                    console.log('error: ', err);
-                });
-            }
-
-        }, 3000); 
+        }, 60000); 
     }
 
     stopListPeersInterval() {
@@ -664,7 +666,7 @@ class AsteriskModel {
         const EXTEN = objData.EXTEN;
         const callerid = objData.callerid ? objData.callerid : objData.EXTEN;
         //const command = `asterisk -rx 'channel originate ${TECNOLOGY}/${PEER_ID} extension ${EXTEN}@${CONTEXT_ID} callerid ${callerid}'`
-        if (PEER_ID && TECNOLOGY && CONTEXT_ID && EXTEN && callerid){
+        if (PEER_ID && TECNOLOGY && CONTEXT_ID && EXTEN && callerid) {
             this.ami.action({
                 action: 'Originate',
                 channel: `${TECNOLOGY}/${PEER_ID}`,
@@ -689,7 +691,7 @@ class AsteriskModel {
 
     async PEER_TO_PEER(objData) {
         await this.checkConnection();
-        
+
         const EQUIPMENT_ID = this.EQUIPMENT_ID;
         const CALL_TYPE = objData.CALL_TYPE;
         const CALL_CENTER_ID = objData.CALL_CENTER_ID;
@@ -705,8 +707,8 @@ class AsteriskModel {
         const UNIQUEID = objData.UNIQUEID;
         const RECORD_FILE = objData.RECORD_FILE;
         const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
-        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
-        const DESTINATION_AGENT_NAME = this.validString(objData.DESTINATION_AGENT_NAME)  ? objData.DESTINATION_AGENT_NAME : null;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME) ? objData.SOURCE_AGENT_NAME : null;
+        const DESTINATION_AGENT_NAME = this.validString(objData.DESTINATION_AGENT_NAME) ? objData.DESTINATION_AGENT_NAME : null;
         try {
             const confData = {
                 EQUIPMENT_ID: EQUIPMENT_ID,
@@ -787,7 +789,7 @@ class AsteriskModel {
 
     async PEER_TO_TRUNK(objData) {
         await this.checkConnection();
-        
+
         const EQUIPMENT_ID = this.EQUIPMENT_ID;
         const CALL_TYPE = objData.CALL_TYPE;
         const CALL_CENTER_ID = objData.CALL_CENTER_ID;
@@ -804,7 +806,7 @@ class AsteriskModel {
         const RECORD_FILE = objData.RECORD_FILE;
         const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
         const DESTINATION_POS_PEER = objData.DESTINATION_POS_PEER;
-        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME) ? objData.SOURCE_AGENT_NAME : null;
 
         try {
             const confData = {
@@ -883,7 +885,6 @@ class AsteriskModel {
 
     async PEER_TO_QUEUE(objData) {
         await this.checkConnection();
-         ;
         const EQUIPMENT_ID = this.EQUIPMENT_ID;
         const CALL_TYPE = objData.CALL_TYPE;
         const CALL_CENTER_ID = objData.CALL_CENTER_ID;
@@ -900,7 +901,7 @@ class AsteriskModel {
         const RECORD_FILE = objData.RECORD_FILE;
         const SOURCE_AGENT_ID = objData.SOURCE_AGENT_ID > 0 ? objData.SOURCE_AGENT_ID : null;
         const DESTINATION_QUEUE_ID = objData.DESTINATION_QUEUE_ID;
-        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME)  ? objData.SOURCE_AGENT_NAME : null;
+        const SOURCE_AGENT_NAME = this.validString(objData.SOURCE_AGENT_NAME) ? objData.SOURCE_AGENT_NAME : null;
 
         try {
             const confData = {
@@ -970,7 +971,7 @@ class AsteriskModel {
                                     ${DESTINATION_QUEUE_ID},
                                     NOW()
                                 )
-                        `
+                        `;
             await this.connection.beginTransaction()
             const results = await this.connection.execute(query)
             await this.connection.commit()
@@ -982,7 +983,7 @@ class AsteriskModel {
 
     async CALL_ANSWERED(objData) {
         await this.checkConnection();
-        
+
         const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
         try {
@@ -1016,7 +1017,7 @@ class AsteriskModel {
 
     async ANSWERED_QUEUE(objData) {
         await this.checkConnection();
-        
+
         const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
         const DESTINATION_AGENT_NAME = objData.DESTINATION_AGENT_NAME
@@ -1041,7 +1042,7 @@ class AsteriskModel {
                                 DATE_ANSWER = NOW(),
                                 WAITING_TIME = IFNULL(TIMESTAMPDIFF(SECOND, DATE_START, DATE_ANSWER), TIMESTAMPDIFF(SECOND, DATE_START, NOW())),
                                 DESTINATION_PEER_ID=${DESTINATION_PEER_ID}
-                                ${DESTINATION_AGENT_NAME?`,DESTINATION_AGENT_NAME="${DESTINATION_AGENT_NAME}"`: ''}
+                                ${DESTINATION_AGENT_NAME ? `,DESTINATION_AGENT_NAME="${DESTINATION_AGENT_NAME}"` : ''}
                             WHERE
                                 UNIQUEID = "${UNIQUEID}"
                         `
@@ -1056,7 +1057,7 @@ class AsteriskModel {
 
     async END_CALL(objData) {
         await this.checkConnection();
-        
+
         const EQUIPMENT_ID = this.EQUIPMENT_ID
         const UNIQUEID = objData.UNIQUEID
         try {
@@ -1065,11 +1066,13 @@ class AsteriskModel {
                             FROM
                                 TB_CDR
                             WHERE
-                                UNIQUEID=${UNIQUEID}
+                                UNIQUEID="${UNIQUEID}"
                         `;
             const results = await this.connection.execute(query)
-            const RECORD_FILE = results[0].RECORD_FILE
-            await this.converterWavToMp3(RECORD_FILE)
+            if (results.length > 0) {
+                const RECORD_FILE = results[0].RECORD_FILE
+                await this.converterWavToMp3(RECORD_FILE);
+            }
         } catch (error) {
             console.log(error)
         }

@@ -1,0 +1,150 @@
+#DADOS PARA INSTALAR
+clear
+echo "Preparação do SO"
+apt update && apt full-upgrade -y
+apt clean
+apt autoremove
+apt install -y vim curl git ffmpeg mariadb-server mariadb-client  python3 python3-pip python3.11-venv sox mpg123
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+nvm install 22
+
+echo "Validação do Banco de dados"
+count=$(mysql -uroot -sse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'ASTERISK';")
+if [ $count -eq 0 ]; then
+  mysql -uroot -e "CREATE DATABASE ASTERISK;"
+  mysql -uroot -e "CREATE USER 'asterisk'@'%' IDENTIFIED BY '1qazxsw23EDC\!\@\#';"
+  mysql -uroot -e "GRANT ALL PRIVILEGES ON ASTERISK.* TO 'asterisk'@'%';"
+  mysql -uroot -e "FLUSH PRIVILEGES;"
+else
+  echo "Database ASTERISK já existe."
+fi
+
+echo "Cria tabela cdr"
+mysql -uroot ASTERISK -e "CREATE TABLE IF NOT EXISTS cdr (
+    calldate DATETIME NOT NULL,
+    clid VARCHAR(80) NOT NULL,
+    src VARCHAR(80) NOT NULL,
+    dst VARCHAR(80) NOT NULL,
+    dcontext VARCHAR(80) NOT NULL,
+    channel VARCHAR(80) NOT NULL,
+    dstchannel VARCHAR(80) NOT NULL,
+    lastapp VARCHAR(80) NOT NULL,
+    lastdata VARCHAR(80) NOT NULL,
+    duration INT NOT NULL,
+    billsec INT NOT NULL,
+    disposition VARCHAR(45) NOT NULL,
+    amaflags INT NOT NULL,
+    accountcode VARCHAR(20) NOT NULL,
+    uniqueid VARCHAR(32) NOT NULL,
+    userfield VARCHAR(255) NOT NULL,
+    peeraccount VARCHAR(20) NOT NULL,
+    linkedid VARCHAR(32) NOT NULL
+);
+"
+echo "Cria tabela TB_CDR_FULL"
+mysql -uroot ASTERISK -e"CREATE TABLE IF NOT EXISTS TB_CDR_FULL (
+    CALL_CENTER_ID INT,
+    CALL_CENTER_NAME VARCHAR (100),
+    CUSTOMER_ID INT,
+    CUSTOMER_NAME  VARCHAR (100),
+    SOURCE_PEER_ID VARCHAR (100),
+    SOURCE_PEER_CALLER_NUM VARCHAR (100),
+    SOURCE_PEER_CALLER_NAME VARCHAR (100),
+    DESTINATION_PEER_ID VARCHAR (100),
+    DESTINATION_PEER_CALLER_NUM VARCHAR (100),
+    DESTINATION_PEER_CALLER_NAME VARCHAR (100),
+    UNIQUEID VARCHAR(80),
+    CALL_TYPE VARCHAR(15),
+    DESTINATION_QUEUE_ID VARCHAR (100),
+    DESTINATION_QUEUE_NAME VARCHAR (100),
+    SOURCE_AGENT_ID VARCHAR (100),
+    SOURCE_AGENT_NAME VARCHAR (100),
+    DESTINATION_AGENT_ID VARCHAR (100),
+    DESTINATION_AGENT_NAME VARCHAR (100),
+    DESTINATION_POS_PEER VARCHAR(100),
+    DATE_START DATETIME,
+    DATE_ANSWER DATETIME,
+    DATE_END DATETIME,
+    WAITING_TIME INT,
+    TALK_TIME INT,
+    DURATION INT,
+    RECORD_FILE VARCHAR(300)
+);"
+
+echo "Cria tabela TB_CDR_TODAY"
+mysql -uroot ASTERISK -e "CREATE TABLE IF NOT EXISTS TB_CDR_TODAY (
+    CALL_CENTER_ID INT,
+    CALL_CENTER_NAME VARCHAR (100),
+    CUSTOMER_ID INT,
+    CUSTOMER_NAME  VARCHAR (100),
+    SOURCE_PEER_ID VARCHAR (100),
+    SOURCE_PEER_CALLER_NUM VARCHAR (100),
+    SOURCE_PEER_CALLER_NAME VARCHAR (100),
+    DESTINATION_PEER_ID VARCHAR (100),
+    DESTINATION_PEER_CALLER_NUM VARCHAR (100),
+    DESTINATION_PEER_CALLER_NAME VARCHAR (100),
+    UNIQUEID VARCHAR(80),
+    CALL_TYPE VARCHAR(15),
+    DESTINATION_QUEUE_ID VARCHAR (100),
+    DESTINATION_QUEUE_NAME VARCHAR (100),
+    SOURCE_AGENT_ID VARCHAR (100),
+    SOURCE_AGENT_NAME VARCHAR (100),
+    DESTINATION_AGENT_ID VARCHAR (100),
+    DESTINATION_AGENT_NAME VARCHAR (100),
+    DESTINATION_POS_PEER VARCHAR(100),
+    DATE_START DATETIME,
+    DATE_ANSWER DATETIME,
+    DATE_END DATETIME,
+    WAITING_TIME INT,
+    TALK_TIME INT,
+    DURATION INT,
+    RECORD_FILE VARCHAR(300)
+);"
+
+echo "Cria tabela TB_CDR"
+mysql -uroot ASTERISK -e "CREATE TABLE IF NOT EXISTS TB_CDR (
+    CALL_CENTER_ID INT,
+    CALL_CENTER_NAME VARCHAR (100),
+    CUSTOMER_ID INT,
+    CUSTOMER_NAME  VARCHAR (100),
+    SOURCE_PEER_ID VARCHAR (100),
+    SOURCE_PEER_CALLER_NUM VARCHAR (100),
+    SOURCE_PEER_CALLER_NAME VARCHAR (100),
+    DESTINATION_PEER_ID VARCHAR (100),
+    DESTINATION_PEER_CALLER_NUM VARCHAR (100),
+    DESTINATION_PEER_CALLER_NAME VARCHAR (100),
+    UNIQUEID VARCHAR(80),
+    CALL_TYPE VARCHAR(15),
+    DESTINATION_QUEUE_ID VARCHAR (100),
+    DESTINATION_QUEUE_NAME VARCHAR (100),
+    SOURCE_AGENT_ID VARCHAR (100),
+    SOURCE_AGENT_NAME VARCHAR (100),
+    DESTINATION_AGENT_ID VARCHAR (100),
+    DESTINATION_AGENT_NAME VARCHAR (100),
+    DESTINATION_POS_PEER VARCHAR(100),
+    DATE_START DATETIME,
+    DATE_ANSWER DATETIME,
+    DATE_END DATETIME,
+    WAITING_TIME INT,
+    TALK_TIME INT,
+    DURATION INT,
+    RECORD_FILE VARCHAR(300)
+);"
+
+echo "Cria tabela TB_EQUIPMENT"
+mysql -uroot ASTERISK -e "CREATE TABLE IF NOT EXISTS TB_EQUIPMENT (
+    EQUIPMENT_ID INT
+);"
+
+curl -o /usr/src/asterisk-20-current.tar.gz https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz
+cd /usr/src
+tar -xvzf asterisk-20-current.tar.gz
+rm asterisk-20-current.tar.gz
+cd asterisk-*
+bash contrib/scripts/install_prereq install
+./configure
+make && make install
+make basic-pbx
+make install-logrotate
+make config
