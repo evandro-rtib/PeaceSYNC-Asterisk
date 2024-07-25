@@ -20,7 +20,6 @@ class AsteriskModel {
         this.folder_globals = `${this.folder_asterisk}/globals`;
         this.folder_scripts = `${this.folder_asterisk}/scripts`;
         this.folder_scripts = `${this.folder_asterisk}/python`;
-        this.peersHUB = [];
         this.EQUIPMENT_ID = 0;
         this.pool = null;
         this.connection = null;
@@ -554,13 +553,12 @@ class AsteriskModel {
         });
 
         this.ami.on('disconnect', () => {
-            console.error('AMI Disconnected');
+            //console.error('AMI Disconnected');
             this.reconnectAMI();
             this.stopListPeersInterval();
         });
 
         this.ami.on('connect', () => {
-            console.log('AMI Connected');
             this.startListPeersInterval();
         });
 
@@ -589,6 +587,7 @@ class AsteriskModel {
 
     startListPeersInterval() {
         this.listPeersInterval = setInterval(async () => {
+            console.log(this.count);
             this.count++;
             await new Promise((resolve, reject) => {
                 this.ami.action({
@@ -614,13 +613,13 @@ class AsteriskModel {
                         STATUS: peer.STATUS
                     }
                     objData.push(data)
-                }    
+                }
                 const url = `http://${hub.host}:${hub.port}/peers/updateStatus`;
                 axios.post(`${url}`, objData);
                 this.sendPeersStatus = false;
                 this.peersSend = {};
-            } 
-        }, 60000); 
+            }
+        }, 60000);
     }
 
     stopListPeersInterval() {
@@ -1115,4 +1114,3 @@ class AsteriskModel {
 }
 
 module.exports = new AsteriskModel();
-
