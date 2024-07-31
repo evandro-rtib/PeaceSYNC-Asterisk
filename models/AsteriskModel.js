@@ -51,7 +51,6 @@ class AsteriskModel {
             }
         } catch (error) {
             console.log('Error reconnecting to the database:', error);
-            throw error;
         }
     }
 
@@ -511,17 +510,17 @@ class AsteriskModel {
 
     async converterWavToMp3(source) {
         if (source) {
-            const command = `/bin/bash /etc/asterisk/scripts/converterWavToMp3.sh ${source}`;
+            const command = `/bin/bash /etc/asterisk/scripts/converterWavToMp3.sh ${source} &`;
             setTimeout(() => {
                 exec(command, (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`Erro ao converter: ${error.message}`);
-                        return;
-                    }
-                    if (stderr) {
-                        console.error(`Erro ao converter: ${stderr}`);
-                        return;
-                    }
+                    // if (error) {
+                    //     console.error(`Erro ao converter: ${error.message}`);
+                    //     return;
+                    // }
+                    // if (stderr) {
+                    //     console.error(`Erro ao converter: ${stderr}`);
+                    //     return;
+                    // }
                     console.log(`Conversão finalizada: ${stdout}`);
                 });
             }, 3000);
@@ -1069,24 +1068,23 @@ class AsteriskModel {
                         `;
             const results = await this.connection.execute(query)
             if (results.length > 0) {
-                const RECORD_FILE = results[0].RECORD_FILE
-                await this.converterWavToMp3(RECORD_FILE);
+                const RECORD_FILE = results[0].RECORD_FILE;
+                this.converterWavToMp3(RECORD_FILE);
+                try {
+                    const confData = {
+                        EQUIPMENT_ID: EQUIPMENT_ID,
+                        UNIQUEID: UNIQUEID,
+                    }
+                    const url = `http://${hub.host}:${hub.port}/asterisk/cdr/END_CALL`;
+                    const response = axios.post(`${url}`, confData);
+                } catch (error) {
+                    console.log(error)
+                }
+
             }
         } catch (error) {
             console.log(error)
         }
-
-        try {
-            const confData = {
-                EQUIPMENT_ID: EQUIPMENT_ID,
-                UNIQUEID: UNIQUEID,
-            }
-            const url = `http://${hub.host}:${hub.port}/asterisk/cdr/END_CALL`;
-            const response = await axios.post(`${url}`, confData);
-        } catch (error) {
-            console.log(error)
-        }
-
 
         try {
             const query = ` UPDATE
