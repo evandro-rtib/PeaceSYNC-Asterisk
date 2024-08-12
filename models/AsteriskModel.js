@@ -1066,7 +1066,7 @@ class AsteriskModel {
                             WHERE
                                 UNIQUEID="${UNIQUEID}"
                         `;
-            const results = await this.connection.execute(query)
+            const results = await this.connection.execute(query);
             if (results.length > 0) {
                 const RECORD_FILE = results[0].RECORD_FILE;
                 this.converterWavToMp3(RECORD_FILE);
@@ -1078,12 +1078,11 @@ class AsteriskModel {
                     const url = `http://${hub.host}:${hub.port}/asterisk/cdr/END_CALL`;
                     const response = axios.post(`${url}`, confData);
                 } catch (error) {
-                    console.log(error)
+                    console.log(error);
                 }
-
             }
         } catch (error) {
-            console.log(error)
+            console.log(error);
         }
 
         try {
@@ -1097,13 +1096,13 @@ class AsteriskModel {
                                 RECORD_FILE = REPLACE(RECORD_FILE, '.wav', '.mp3')
                             WHERE
                                 UNIQUEID = "${UNIQUEID}"
-                        `
-            await this.connection.beginTransaction()
-            const results = await this.connection.execute(query)
-            await this.connection.commit()
-            return results
+                        `;
+            await this.connection.beginTransaction();
+            const results = await this.connection.execute(query);
+            await this.connection.commit();
+            return results;
         } catch (error) {
-            console.log(error)
+            console.log(error);
         }
     }
 
