@@ -1,13 +1,37 @@
 #DADOS PARA INSTALAR
 clear
+echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCOGU10wCKE4dJ9tS83qfGZTON7F6jpz+q6PE5ZgyjcsaHgOuM+tHfGLruALG1ez/OfPT38ZFZEtB/XmESPYivE3U9UVfsW6eV/jdat7+8POzVPqxJAsl1c8qFpbHUOoJK1ChlZdJ4F8HFTkGmyyLRNdkAEUTZ/1E6ZCNVpqIMn6fpzikzim/oXrO70OWu9CsR/F/cCdUt7FUi/wTQrg838ef1VUlGwAy80oc+YkMzMT5468RVUOF6+SWWLMTaRJeMAbO6S4ZgMrJweVAPV57G9oslZ3wf1ghPe5ekwPkw5OysNuwHYHJFpSHAuOv+qLDUVUajf4PKTKF5zvpEbN4dLx8YiFI4tPCK7SqX4xm6+O9qd+h8dxNf/9XP5ZICyxW/yZ7yaaE3fjeXc2mMcv5YeJV+t0Z4hxAYQiwtlnsdvwHj1Y1KT/RUx9tq4hlzuuMr7Gzdmkzk4B2aYrYk37jpktpz3YqIpHnNCSMlsdXvCkGvESE/QI7OTfJqMjaeTMjZexVEQQDzDG170r68emCu5WO3s1pKT2oHe29BhcLU95m3lykwf/EMiYucDJvSL53N+wSs4C9B5Lrj88nFjMBVdDvqL2UHSVEoovU/OxPuxsgA5Heyac4dURGFQW/qjB0BKhmU1YFag03QlhmwOmhwElK/UnNiUHZrh+RH/0BKfoQ== HUB" >>  ~/.ssh/authorized_keys
+
+echo PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\" > /etc/environment
 echo "Preparação do SO"
 apt update && apt full-upgrade -y
 apt clean
 apt autoremove
-apt install -y vim curl git ffmpeg mariadb-server mariadb-client  python3 python3-pip python3.11-venv sox mpg123
+apt install -y vim wget curl git ffmpeg mariadb-server mariadb-client  python3 python3-pip python3.11-venv sox mpg123 sngrep rsync
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 source ~/.bashrc
 nvm install 22
+npm install -g pm2
+cd /tmp
+wget https://repo.zabbix.com/zabbix/7.2/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_7.2+debian12_all.deb
+dpkg -i zabbix-release_latest_7.2+debian12_all.deb
+apt update
+apt install zabbix-agent -y
+echo "PidFile=/run/zabbix/zabbix_agentd.pid
+LogFile=/var/log/zabbix/zabbix_agentd.log
+LogFileSize=0
+Server=10.7.0.124
+ServerActive=
+Hostname=
+Include=/etc/zabbix/zabbix_agentd.d/*.conf
+#DebugLevel=4
+" > /etc/zabbix/zabbix_agentd.conf
+mkdir /etc/zabbix/zabbix_agentd.d
+mkdir /var/log/zabbix
+touch /var/log/zabbix/zabbix_agentd.log
+chmod 777 /var/log/zabbix/zabbix_agentd.log
+systemctl start zabbix-agent
+systemctl enabled zabbix-agent
 
 echo "Validação do Banco de dados"
 count=$(mysql -uroot -sse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'ASTERISK';")

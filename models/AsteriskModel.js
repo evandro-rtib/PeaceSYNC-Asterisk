@@ -336,6 +336,8 @@ class AsteriskModel {
                                 client_uri=sip:${trunkData.ACCOUNT}@${trunkData.ADDRESS}:${trunkData.PORT}
                                 contact_user=${trunkData.ACCOUNT}
                                 retry_interval=60
+                                forbidden_retry_interval=600
+                                expiration=300
                                 line=yes
                                 endpoint=trunk-${trunkData.ID}
                             `
@@ -344,6 +346,7 @@ class AsteriskModel {
                                 [trunk-${trunkData.ID}](endpoint-${trunkData.TEMPLATE_ID}) ; ${trunkData.OPERATOR_NAME}
                                 outbound_auth=auth-trunk-${trunkData.ID}
                                 aors=trunk-${trunkData.ID}
+                                from_domain=${trunkData.ADDRESS}
                                 set_var=CALL_CENTER_ID=${trunkData.CALL_CENTER_ID}
                                 set_var=CALL_CENTER_NAME=${trunkData.CALL_CENTER_NAME}
                                 set_var=CUSTOMER_ID=${trunkData.CUSTOMER_ID}
@@ -353,6 +356,7 @@ class AsteriskModel {
                             [auth-trunk-${trunkData.ID}](auth-${trunkData.TEMPLATE_ID}) ; ${trunkData.OPERATOR_NAME}
                             username=${trunkData.ACCOUNT}
                             password=${trunkData.PASSWORD}
+                            realm=${trunkData.ADDRESS}
 
                         `
         let aor = `
